@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>泊车轨迹可视化 - 实际轨迹 vs 预测轨迹</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            overflow: hidden;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        /* Left: 3D View */
+        .viewer3d {
+            flex: 1.2;
+            position: relative;
+            background: #0f0f1a;
+        }
+        /* Right: Video Panel */
+        .video-panel {
+            flex: 0.8;
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+            gap: 15px;
+            background: #16213e;
+        }
+        .video-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 12px;
+            flex: 1;
+            min-height: 0;
+        }
+        .video-card {
+            background: #0f0f1a;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            border: 2px solid #2c3e66;
+            transition: all 0.3s;
+        }
+        .video-card.active {
+            border-color: #00ff88;
+            box-shadow: 0 0 15px rgba(0,255,136,0.3);
+        }
+        .video-label {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            background: rgba(0,0,0,0.7);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            color: white;
+            z-index: 10;
+            font-weight: bold;
+            backdrop-filter: blur(4px);
+        }
+        .video-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        /* Controls */
+        .controls {
+            background: #0f0f1a;
+            border-radius: 12px;
+            padding: 15px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        button {
+            background: #2c3e66;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: #00ff88;
+            color: #1a1a2e;
+            transform: scale(1.02);
+        }
+        .progress-area {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .progress-bar {
+            flex: 1;
+            height: 6px;
+            background: #2c3e66;
+            border-radius: 3px;
+            cursor: pointer;
+            position: relative;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #00ff88;
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+        .frame-info {
+            font-family: monospace;
+            font-size: 13px;
+            color: #aaa;
+            min-width: 100px;
+        }
+        select {
+            background: #2c3e66;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        .info-panel {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            color: white;
+            z-index: 100;
+            pointer-events: none;
+            font-family: monospace;
+        }
+        .legend {
+            position: absolute;
+            bottom: 15px;
+            left: 15px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(8px);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 11px;
+            color: white;
+            z-index: 100;
+            display: flex;
+            gap: 15px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .legend-color {
+            width: 20px;
+            height: 3px;
+            border-radius: 2px;
+        }
+        .legend-color.circle {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        .prediction-select {
+            background: #2c3e66;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+        @media (max-width: 1000px) {
+            .container { flex-direction: column; }
+            .viewer3d { min-height: 350px; }
+            .video-panel { flex: 1; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="viewer3d">
+        <div id="canvas-container" style="width:100%;height:100%"></div>
+        <div class="info-panel">
+            <div>🚗 Frame: <span id="curFrame">0</span> / <span id="totalFrames">0</span></div>
+            <div>📊 Actual Progress: <span id="trajPercent">0</span>%</div>
+            <div>
+                🔮 Prediction:
+                <select id="predSelect" class="prediction-select"></select>
+            </div>
+        </div>
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background: #4488ff;"></div>
+                <span>Actual Trajectory</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #ff3366;"></div>
+                <span>Predicted Trajectory</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color circle" style="background: #ff6600;"></div>
+                <span>Current Position</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color circle" style="background: #00ff88;"></div>
+                <span>Target Point</span>
+            </div>
+        </div>
+    </div>
+    <div class="video-panel">
+        <div class="video-grid" id="videoGrid"></div>
+        <div class="controls">
+            <button id="playBtn">▶ Play</button>
+            <button id="pauseBtn">⏸ Pause</button>
+            <button id="resetBtn">⟳ Reset</button>
+            <div class="progress-area">
+                <div class="progress-bar" id="progressBar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <span class="frame-info" id="frameLabel">0 / 0</span>
+            </div>
+            <select id="speedSelect">
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // --- Global State ---
+    let manifest = null;
+    let totalFrames = 0;
+    let currentIdx = 0;
+    let isPlaying = false;
+    let animFrame = null;
+    let lastTime = 0;
+    let speed = 1;
+    let fps = 10;
+
+    // Trajectory data
+    let actualTrajectory = [];
+    let predictions = [];
+    let currentPredictionIdx = 0;
+
+    // Cache images
+    const imgCache = new Map();
+
+    // Three.js objects
+    let scene, camera, renderer, controls;
+    let actualLine = null;           // 蓝色实际轨迹
+    let actualProgressLine = null;   // 实际轨迹进度（亮蓝色）
+    let predictedLine = null;        // 红色预测轨迹
+    let carMarker = null;
+    let targetPoint = null;
+
+    // --- Load Data ---
+    async function loadData() {
+        try {
+            const res = await fetch('manifest.json');
+            manifest = await res.json();
+
+            totalFrames = manifest.total_frames;
+            fps = manifest.fps || 10;
+            actualTrajectory = manifest.actual_trajectory || [];
+            predictions = manifest.predictions || [];
+
+            document.getElementById('totalFrames').innerText = totalFrames;
+            document.getElementById('frameLabel').innerText = `0 / ${totalFrames}`;
+
+            // 填充预测轨迹选择器
+            const predSelect = document.getElementById('predSelect');
+            for (let i = 0; i < predictions.length; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = `Prediction ${i + 1} (t=${predictions[i].timestamp.toFixed(1)})`;
+                predSelect.appendChild(option);
+            }
+            predSelect.addEventListener('change', (e) => {
+                currentPredictionIdx = parseInt(e.target.value);
+                drawPredictedTrajectory();
+            });
+
+            console.log(`Loaded: ${totalFrames} frames, ${actualTrajectory.length} actual points, ${predictions.length} predictions`);
+
+            initThree();
+            buildVideoGrid();
+            drawActualTrajectory();
+            drawPredictedTrajectory();
+
+            await preloadFrame(0);
+            updateFrame(0);
+
+        } catch(e) {
+            console.error('Load failed:', e);
+            alert('Please make sure manifest.json exists in current directory');
+        }
+    }
+
+    // --- Three.js ---
+    function initThree() {
+        const container = document.getElementById('canvas-container');
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0f0f1a);
+        scene.fog = new THREE.FogExp2(0x0f0f1a, 0.02);
+
+        camera = new THREE.PerspectiveCamera(45, w/h, 0.1, 200);
+        camera.position.set(10, 8, 12);
+        camera.lookAt(0,0,0);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(w, h);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.target.set(0,0,0);
+
+        // Grid
+        const grid = new THREE.GridHelper(25, 20, 0x88aaff, 0x335588);
+        grid.position.y = -0.05;
+        grid.material.transparent = true;
+        grid.material.opacity = 0.5;
+        scene.add(grid);
+
+        // Lights
+        const ambient = new THREE.AmbientLight(0x404060);
+        scene.add(ambient);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(5,10,7);
+        scene.add(dirLight);
+        const fill = new THREE.PointLight(0x4466cc, 0.3);
+        fill.position.set(-3,5,4);
+        scene.add(fill);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            const nw = container.clientWidth, nh = container.clientHeight;
+            camera.aspect = nw / nh;
+            camera.updateProjectionMatrix();
+            renderer.setSize(nw, nh);
+        });
+    }
+
+    function drawActualTrajectory() {
+        if (!actualTrajectory.length) return;
+
+        // 完整实际轨迹（半透明蓝色）
+        const points = actualTrajectory.map(p => new THREE.Vector3(p.x, 0.05, p.y));
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const mat = new THREE.LineBasicMaterial({ color: 0x4488ff });
+        actualLine = new THREE.Line(geo, mat);
+        scene.add(actualLine);
+
+        // 目标点（最后一个实际点）
+        const last = actualTrajectory[actualTrajectory.length-1];
+        const sphere = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2, 16, 16),
+            new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x006644 })
+        );
+        sphere.position.set(last.x, 0.1, last.y);
+        targetPoint = sphere;
+        scene.add(targetPoint);
+    }
+
+    function drawPredictedTrajectory() {
+        // 清除旧的预测轨迹
+        if (predictedLine) scene.remove(predictedLine);
+
+        if (predictions.length === 0 || currentPredictionIdx >= predictions.length) return;
+
+        const pred = predictions[currentPredictionIdx];
+        if (!pred.trajectory.length) return;
+
+        const points = pred.trajectory.map(p => new THREE.Vector3(p.x, 0.08, p.y));
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const mat = new THREE.LineBasicMaterial({ color: 0xff3366, linewidth: 2 });
+        predictedLine = new THREE.Line(geo, mat);
+        scene.add(predictedLine);
+
+        // 可选：显示预测目标点
+        if (pred.target_point && !document.getElementById('showPredTarget').checked) {
+            // 可以添加预测目标标记
+        }
+    }
+
+    function updateActualProgress(frameIdx) {
+        if (!actualTrajectory.length) return;
+
+        // 找到当前帧对应的轨迹点
+        let lastIdx = -1;
+        for (let i=0; i<actualTrajectory.length; i++) {
+            if (actualTrajectory[i].frame <= frameIdx) lastIdx = i;
+            else break;
+        }
+
+        if (lastIdx < 0) lastIdx = 0;
+        const percent = ((lastIdx+1) / actualTrajectory.length * 100).toFixed(1);
+        document.getElementById('trajPercent').innerText = percent;
+
+        // 更新进度轨迹
+        if (actualProgressLine) scene.remove(actualProgressLine);
+
+        const visiblePoints = actualTrajectory.slice(0, lastIdx+1);
+        if (visiblePoints.length >= 2) {
+            const points3d = visiblePoints.map(p => new THREE.Vector3(p.x, 0.06, p.y));
+            const geo = new THREE.BufferGeometry().setFromPoints(points3d);
+            const mat = new THREE.LineBasicMaterial({ color: 0x88ccff, linewidth: 2 });
+            actualProgressLine = new THREE.Line(geo, mat);
+            scene.add(actualProgressLine);
+        }
+
+        // 更新车辆位置标记
+        if (carMarker) scene.remove(carMarker);
+        const lastPos = visiblePoints[visiblePoints.length-1];
+        const markerGeo = new THREE.ConeGeometry(0.18, 0.45, 8);
+        const markerMat = new THREE.MeshStandardMaterial({ color: 0xff6600 });
+        carMarker = new THREE.Mesh(markerGeo, markerMat);
+        carMarker.position.set(lastPos.x, 0.15, lastPos.y);
+        const yawRad = (lastPos.yaw || 0) * Math.PI / 180;
+        carMarker.rotation.y = yawRad;
+        scene.add(carMarker);
+    }
+
+    // --- Video Grid ---
+    function buildVideoGrid() {
+        const grid = document.getElementById('videoGrid');
+        grid.innerHTML = '';
+        const cameras = manifest.cameras;
+        const names = manifest.camera_names;
+        for (let cam of cameras) {
+            const card = document.createElement('div');
+            card.className = 'video-card';
+            card.id = `card_${cam}`;
+            card.innerHTML = `
+                <div class="video-label">${names[cam] || cam}</div>
+                <img id="img_${cam}" src="" alt="${cam}">
+            `;
+            grid.appendChild(card);
+        }
+    }
+
+    async function preloadFrame(idx) {
+        const frameName = manifest.frame_names[idx];
+        if (!frameName) return;
+        const cameras = manifest.cameras;
+        for (let cam of cameras) {
+            const key = `${cam}_${idx}`;
+            if (!imgCache.has(key)) {
+                const url = `frames/${cam}/${frameName}.png`;
+                try {
+                    const res = await fetch(url);
+                    const blob = await res.blob();
+                    const dataUrl = await new Promise(resolve => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.readAsDataURL(blob);
+                    });
+                    imgCache.set(key, dataUrl);
+                    if (idx === currentIdx) {
+                        const imgElem = document.getElementById(`img_${cam}`);
+                        if (imgElem) imgElem.src = dataUrl;
+                    }
+                } catch(e) {
+                    // console.warn(`Failed to load ${url}`);
+                }
+            } else if (idx === currentIdx) {
+                const imgElem = document.getElementById(`img_${cam}`);
+                if (imgElem) imgElem.src = imgCache.get(key);
+            }
+        }
+    }
+
+    function updateFrame(idx) {
+        if (idx >= totalFrames) {
+            pausePlay();
+            return;
+        }
+        currentIdx = idx;
+        const frameName = manifest.frame_names[idx];
+        document.getElementById('curFrame').innerText = idx;
+        document.getElementById('frameLabel').innerText = `${idx} / ${totalFrames}`;
+        const percentBar = (idx / (totalFrames-1)) * 100;
+        document.getElementById('progressFill').style.width = `${percentBar}%`;
+
+        // Update images
+        const cameras = manifest.cameras;
+        for (let cam of cameras) {
+            const key = `${cam}_${idx}`;
+            if (imgCache.has(key)) {
+                const imgEl = document.getElementById(`img_${cam}`);
+                if (imgEl) imgEl.src = imgCache.get(key);
+            } else {
+                const imgEl = document.getElementById(`img_${cam}`);
+                if (imgEl) imgEl.src = '';
+                preloadFrame(idx);
+            }
+        }
+
+        // Update 3D trajectory progress
+        updateActualProgress(idx);
+
+        // Preload next frames
+        for (let i=1; i<=3; i++) {
+            if (idx+i < totalFrames) preloadFrame(idx+i);
+        }
+    }
+
+    // --- Playback ---
+    function startPlay() {
+        if (isPlaying) return;
+        isPlaying = true;
+        lastTime = performance.now();
+        function step(now) {
+            if (!isPlaying) return;
+            const delta = now - lastTime;
+            const interval = 1000 / (fps * speed);
+            if (delta >= interval) {
+                let next = currentIdx + 1;
+                if (next < totalFrames) {
+                    updateFrame(next);
+                    lastTime = now;
+                } else {
+                    pausePlay();
+                    return;
+                }
+            }
+            animFrame = requestAnimationFrame(step);
+        }
+        if (animFrame) cancelAnimationFrame(animFrame);
+        animFrame = requestAnimationFrame(step);
+    }
+
+    function pausePlay() {
+        isPlaying = false;
+        if (animFrame) {
+            cancelAnimationFrame(animFrame);
+            animFrame = null;
+        }
+    }
+
+    function resetPlay() {
+        pausePlay();
+        updateFrame(0);
+    }
+
+    // --- Event binding ---
+    function bindEvents() {
+        document.getElementById('playBtn').onclick = startPlay;
+        document.getElementById('pauseBtn').onclick = pausePlay;
+        document.getElementById('resetBtn').onclick = resetPlay;
+        document.getElementById('speedSelect').onchange = (e) => {
+            speed = parseFloat(e.target.value);
+        };
+        const progBar = document.getElementById('progressBar');
+        progBar.addEventListener('click', (e) => {
+            const rect = progBar.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const percent = Math.min(1, Math.max(0, x / rect.width));
+            const newFrame = Math.floor(percent * totalFrames);
+            pausePlay();
+            updateFrame(newFrame);
+        });
+    }
+
+    // --- Start ---
+    loadData();
+    bindEvents();
+</script>
+</body>
+</html>
