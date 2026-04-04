@@ -172,15 +172,30 @@
             height: 12px;
             border-radius: 50%;
         }
-        .prediction-select {
-            background: #2c3e66;
+        .top-controls {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            z-index: 100;
+        }
+        .play-video-btn {
+            background: #0f0f1a;
             color: white;
             border: none;
-            padding: 5px 10px;
-            border-radius: 6px;
-            font-size: 11px;
-            margin-left: 10px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
             cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            pointer-events: auto;
+        }
+        .play-video-btn:hover {
+            background: #0f0f1a;
+            transform: scale(1.02);
         }
         @media (max-width: 1000px) {
             .container { flex-direction: column; }
@@ -196,10 +211,9 @@
         <div class="info-panel">
             <div>🚗 Frame: <span id="curFrame">0</span> / <span id="totalFrames">0</span></div>
             <div>📊 Actual Progress: <span id="trajPercent">0</span>%</div>
-            <div>
-                🔮 Prediction:
-                <select id="predSelect" class="prediction-select"></select>
-            </div>
+        </div>
+        <div class="top-controls">
+            <a href="video_.mp4" class="play-video-btn" target="_blank">🎬 运行展示视频</a>
         </div>
         <div class="legend">
             <div class="legend-item">
@@ -274,15 +288,65 @@
     const imgCache = new Map();
 
     // Three.js objects
-    let scene, camera, renderer, controls;
-    let actualLine = null;           // 蓝色实际轨迹
-    let actualProgressLine = null;   // 实际轨迹进度（亮蓝色）
-    let predictedLine = null;        // 红色预测轨迹
+    let scene, camera, renderer, controls3d;
+    let actualLine = null;
+    let actualProgressLine = null;
+    let predictedLine = null;
     let carMarker = null;
     let targetPoint = null;
 
+    // 显示欢迎弹窗
+    // 显示欢迎弹窗（每次刷新都显示）
+function showWelcomeModal() {
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.8);
+        z-index: 10000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-family: 'Segoe UI', sans-serif;
+    `;
+    modal.innerHTML = `
+        <div style="background: #1a1a2e; color: white; max-width: 500px; width: 90%; border-radius: 16px; padding: 24px; border: 1px solid #878787; box-shadow: 0 0 30px rgba(0,255,136,0.2);">
+            <h2 style="color: #D1EEEE; margin-bottom: 16px;">泊车轨迹可视化</h2>
+            <div style="margin-bottom: 20px;">
+                <h3 style="color: #88aaff; margin-bottom: 10px;">📺 界面说明</h3>
+                <p><span style="color:#4488ff">🔵 蓝色轨迹</span> = 车辆实际行驶路径</p>
+                <p><span style="color:#ff3366">🔴 红色轨迹</span> = 模型预测的泊车路径</p>
+                <p><span style="color:#ff6600">🟠 橙色圆锥</span> = 车辆当前位置</p>
+                <p><span style="color:#00ff88">🟢 绿色球体</span> = 目标停车点</p>
+            </div>
+            <div style="margin-bottom: 20px;">
+                <p>▶ <strong>Play</strong> - 开始播放，视频与轨迹同步前进</p>
+                <p>⏸ <strong>Pause</strong> - 暂停播放</p>
+                <p>⟳ <strong>Reset</strong> - 重置到起点</p>
+            </div>
+            <div style="background: #0f0f1a; padding: 12px; border-radius: 8px; margin-bottom: 20px;">
+                <p style="color: #ffaa66;">⚠️ <strong>温馨提示</strong></p>
+                <p>• 打开网页后，请给图片一些加载时间</p>
+                <p>• 如播放时出现闪烁现象，可多点几次Reset刷新</p>
+                <p>• 建议使用电脑端 + Chrome/Edge浏览器获得最佳体验</p>
+                <p>• 可点击🎬 运行展示视频观看实际运行效果</p>
+            </div>
+            <button id="closeModalBtn" style="background: #F7F7F7; color: #1a1a2e; border: none; padding: 10px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%;">开始 →</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById('closeModalBtn').onclick = () => {
+        modal.remove();
+    };
+}
+
     // --- Load Data ---
     async function loadData() {
+        showWelcomeModal();
+
         try {
             const res = await fetch('manifest.json');
             manifest = await res.json();
@@ -295,18 +359,10 @@
             document.getElementById('totalFrames').innerText = totalFrames;
             document.getElementById('frameLabel').innerText = `0 / ${totalFrames}`;
 
-            // 填充预测轨迹选择器
-            const predSelect = document.getElementById('predSelect');
-            for (let i = 0; i < predictions.length; i++) {
-                const option = document.createElement('option');
-                option.value = i;
-                option.textContent = `Prediction ${i + 1} (t=${predictions[i].timestamp.toFixed(1)})`;
-                predSelect.appendChild(option);
+            // 默认显示第一个预测轨迹
+            if (predictions.length > 0) {
+                currentPredictionIdx = 0;
             }
-            predSelect.addEventListener('change', (e) => {
-                currentPredictionIdx = parseInt(e.target.value);
-                drawPredictedTrajectory();
-            });
 
             console.log(`Loaded: ${totalFrames} frames, ${actualTrajectory.length} actual points, ${predictions.length} predictions`);
 
@@ -319,8 +375,7 @@
             updateFrame(0);
 
         } catch(e) {
-            console.error('Load failed:', e);
-            alert('Please make sure manifest.json exists in current directory');
+            onsole.error('Load failed:', e);
         }
     }
 
@@ -343,10 +398,10 @@
         renderer.shadowMap.enabled = true;
         container.appendChild(renderer.domElement);
 
-        controls = new OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
-        controls.target.set(0,0,0);
+        controls3d = new OrbitControls(camera, renderer.domElement);
+        controls3d.enableDamping = true;
+        controls3d.dampingFactor = 0.05;
+        controls3d.target.set(0,0,0);
 
         // Grid
         const grid = new THREE.GridHelper(25, 20, 0x88aaff, 0x335588);
@@ -367,7 +422,7 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            controls.update();
+            controls3d.update();
             renderer.render(scene, camera);
         }
         animate();
@@ -382,15 +437,12 @@
 
     function drawActualTrajectory() {
         if (!actualTrajectory.length) return;
-
-        // 完整实际轨迹（半透明蓝色）
         const points = actualTrajectory.map(p => new THREE.Vector3(p.x, 0.05, p.y));
         const geo = new THREE.BufferGeometry().setFromPoints(points);
         const mat = new THREE.LineBasicMaterial({ color: 0x4488ff });
         actualLine = new THREE.Line(geo, mat);
         scene.add(actualLine);
 
-        // 目标点（最后一个实际点）
         const last = actualTrajectory[actualTrajectory.length-1];
         const sphere = new THREE.Mesh(
             new THREE.SphereGeometry(0.2, 16, 16),
@@ -402,43 +454,29 @@
     }
 
     function drawPredictedTrajectory() {
-        // 清除旧的预测轨迹
         if (predictedLine) scene.remove(predictedLine);
-
         if (predictions.length === 0 || currentPredictionIdx >= predictions.length) return;
-
         const pred = predictions[currentPredictionIdx];
         if (!pred.trajectory.length) return;
-
         const points = pred.trajectory.map(p => new THREE.Vector3(p.x, 0.08, p.y));
         const geo = new THREE.BufferGeometry().setFromPoints(points);
         const mat = new THREE.LineBasicMaterial({ color: 0xff3366, linewidth: 2 });
         predictedLine = new THREE.Line(geo, mat);
         scene.add(predictedLine);
-
-        // 可选：显示预测目标点
-        if (pred.target_point && !document.getElementById('showPredTarget').checked) {
-            // 可以添加预测目标标记
-        }
     }
 
     function updateActualProgress(frameIdx) {
         if (!actualTrajectory.length) return;
-
-        // 找到当前帧对应的轨迹点
         let lastIdx = -1;
         for (let i=0; i<actualTrajectory.length; i++) {
             if (actualTrajectory[i].frame <= frameIdx) lastIdx = i;
             else break;
         }
-
         if (lastIdx < 0) lastIdx = 0;
         const percent = ((lastIdx+1) / actualTrajectory.length * 100).toFixed(1);
         document.getElementById('trajPercent').innerText = percent;
 
-        // 更新进度轨迹
         if (actualProgressLine) scene.remove(actualProgressLine);
-
         const visiblePoints = actualTrajectory.slice(0, lastIdx+1);
         if (visiblePoints.length >= 2) {
             const points3d = visiblePoints.map(p => new THREE.Vector3(p.x, 0.06, p.y));
@@ -448,7 +486,6 @@
             scene.add(actualProgressLine);
         }
 
-        // 更新车辆位置标记
         if (carMarker) scene.remove(carMarker);
         const lastPos = visiblePoints[visiblePoints.length-1];
         const markerGeo = new THREE.ConeGeometry(0.18, 0.45, 8);
@@ -470,10 +507,7 @@
             const card = document.createElement('div');
             card.className = 'video-card';
             card.id = `card_${cam}`;
-            card.innerHTML = `
-                <div class="video-label">${names[cam] || cam}</div>
-                <img id="img_${cam}" src="" alt="${cam}">
-            `;
+            card.innerHTML = `<div class="video-label">${names[cam] || cam}</div><img id="img_${cam}" src="" alt="${cam}">`;
             grid.appendChild(card);
         }
     }
@@ -499,9 +533,7 @@
                         const imgElem = document.getElementById(`img_${cam}`);
                         if (imgElem) imgElem.src = dataUrl;
                     }
-                } catch(e) {
-                    // console.warn(`Failed to load ${url}`);
-                }
+                } catch(e) {}
             } else if (idx === currentIdx) {
                 const imgElem = document.getElementById(`img_${cam}`);
                 if (imgElem) imgElem.src = imgCache.get(key);
@@ -515,13 +547,11 @@
             return;
         }
         currentIdx = idx;
-        const frameName = manifest.frame_names[idx];
         document.getElementById('curFrame').innerText = idx;
         document.getElementById('frameLabel').innerText = `${idx} / ${totalFrames}`;
         const percentBar = (idx / (totalFrames-1)) * 100;
         document.getElementById('progressFill').style.width = `${percentBar}%`;
 
-        // Update images
         const cameras = manifest.cameras;
         for (let cam of cameras) {
             const key = `${cam}_${idx}`;
@@ -534,11 +564,7 @@
                 preloadFrame(idx);
             }
         }
-
-        // Update 3D trajectory progress
         updateActualProgress(idx);
-
-        // Preload next frames
         for (let i=1; i<=3; i++) {
             if (idx+i < totalFrames) preloadFrame(idx+i);
         }
