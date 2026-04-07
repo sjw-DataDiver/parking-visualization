@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>运行视频</title>
+<style>
+body {
+    margin:0;
+    background:#000;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    height:100vh;
+}
+video {
+    max-width:90%;
+    max-height:80vh;
+}
+button {
+    margin-top:10px;
+    padding:10px 15px;
+    font-size:16px;
+    border:none;
+    border-radius:8px;
+    background:#ffffff;
+    color:#000;
+    font-weight:bold;
+    cursor:pointer;
+}
+</style>
+</head>
+<body>
+
+<video controls autoplay>
+    <source src="video_.mp4" type="video/mp4">
+</video>
+
+<button onclick="window.location.href='index.html'">
+    进入轨迹可视化->
+</button>
+
+</body>
+</html>

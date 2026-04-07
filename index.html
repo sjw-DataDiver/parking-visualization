@@ -213,7 +213,7 @@
             <div>📊 Actual Progress: <span id="trajPercent">0</span>%</div>
         </div>
         <div class="top-controls">
-            <a href="video_.mp4" class="play-video-btn" target="_blank">🎬 运行展示视频</a>
+            <a href="video.html" class="play-video-btn" target="_blank">🎬 运行展示视频</a>
         </div>
         <div class="legend">
             <div class="legend-item">
@@ -334,19 +334,32 @@ function showWelcomeModal() {
                 <p>• 建议使用电脑端 + Chrome/Edge浏览器获得最佳体验</p>
                 <p>• 可点击🎬 运行展示视频观看实际运行效果</p>
             </div>
-            <button id="closeModalBtn" style="background: #F7F7F7; color: #1a1a2e; border: none; padding: 10px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%;">开始 →</button>
+            <div style="display:flex; gap:12px;">
+            <button id="enterVisBtn" style="flex:1; background:#ffffff; color:#000000; border:none; padding:12px; border-radius:8px; font-size:16px; font-weight:bold; cursor:pointer;">
+                进入轨迹可视化->
+            </button>
+
+            <button id="watchVideoBtn" style="flex:1; background:#ffffff; color:#000000; border:none; padding:12px; border-radius:8px; font-size:16px; font-weight:bold; cursor:pointer;">
+                🎬 观看运行视频
+            </button>
+        </div>
+    </div>
+
         </div>
     `;
     document.body.appendChild(modal);
-    document.getElementById('closeModalBtn').onclick = () => {
+    document.getElementById('enterVisBtn').onclick = () => {
         modal.remove();
+    };
+
+    document.getElementById('watchVideoBtn').onclick = () => {
+        window.open('video.html', '_blank');
     };
 }
 
     // --- Load Data ---
     async function loadData() {
         showWelcomeModal();
-
         try {
             const res = await fetch('manifest.json');
             manifest = await res.json();
